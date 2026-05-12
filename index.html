@@ -88,7 +88,7 @@
         /* --- DASHBOARD SCREEN --- */
         #screen-dashboard { background: var(--bg-color); }
         
-        /* Header - Diperkecil paddingnya */
+        /* Header */
         .dash-header {
             background: var(--surface); padding: 1rem 1.25rem;
             border-bottom-left-radius: 20px; border-bottom-right-radius: 20px;
@@ -109,9 +109,9 @@
             content: ''; position: absolute; right: -15px; top: -15px; width: 80px; height: 80px;
             background: rgba(255,255,255,0.1); border-radius: 50%;
         }
-        .stats-val { font-size: 2rem; font-weight: 800; line-height: 1; margin-top: 0.2rem; }
+        .stats-val { font-size: 2rem; font-weight: 800; line-height: 1; margin-top: 0.2rem; transition: transform 0.2s ease; }
 
-        /* Form Area - Jarak antar elemen dipersempit */
+        /* Form Area */
         .dash-body { padding: 1rem 1.25rem; flex: 1; overflow: hidden; display: flex; flex-direction: column; gap: 0.75rem; }
         
         .select-wrapper { position: relative; }
@@ -128,7 +128,7 @@
             background: var(--primary-light); border: 1.5px dashed rgba(22, 163, 74, 0.3);
             border-radius: var(--radius-md); padding: 1rem; text-align: center;
             transition: 0.3s; flex: 1; display: flex; flex-direction: column; justify-content: center;
-            min-height: 80px; /* Menjaga ukuran tetap konsisten */
+            min-height: 80px;
         }
         .info-box.active { background: var(--surface); border-color: var(--primary); border-style: solid; box-shadow: var(--shadow-sm); }
         .info-label { font-size: 0.75rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; margin-bottom: 0.25rem; }
@@ -287,6 +287,7 @@
      * Konfigurasi & State Management
      */
     const CONFIG = {
+        // PERHATIAN: Pastikan link ini berasal dari Google Apps Script yang sudah di-Deploy sbg "Versi Baru"
         API_URL: "https://script.google.com/macros/s/AKfycbwI7splbGbeJNTu3lAuAn8oNXk1MXbhxGfaAyk7saGorGPt9w3bsyn9nMUORb-ES7ns/exec"
     };
 
@@ -338,9 +339,9 @@
      * Core Application Logic
      */
     const app = {
-        // HTTP Request Helper
-        api: async (payload, loadingText) => {
-            ui.toggleLoading(true, loadingText);
+        // HTTP Request Helper (ditambahkan parameter "silent" untuk background fetch)
+        api: async (payload, loadingText, silent = false) => {
+            if (!silent) ui.toggleLoading(true, loadingText);
             try {
                 const response = await fetch(CONFIG.API_URL, {
                     method: 'POST',
@@ -348,10 +349,10 @@
                 });
                 return await response.json();
             } catch (error) {
-                ui.showToast('error', 'Koneksi gagal. Periksa internet Anda.');
+                if (!silent) ui.showToast('error', 'Koneksi gagal. Periksa internet Anda.');
                 return { status: 'error' };
             } finally {
-                ui.toggleLoading(false);
+                if (!silent) ui.toggleLoading(false);
             }
         },
 
@@ -364,7 +365,7 @@
             
             if (res.status === 'success') {
                 state.user = res;
-                await app.fetchMasterData();
+                await app.fetchMasterData(); // blocking fetch pertama kali
                 app.initDashboard();
                 ui.switchScreen('screen-dashboard');
                 ui.showToast('success', `Selamat datang, ${res.nama.split(' ')[0]}!`);
@@ -381,9 +382,9 @@
             }, true);
         },
 
-        // Data Management
-        fetchMasterData: async () => {
-            const res = await app.api({ action: 'getMasterData', idKorektor: state.user.kode }, 'Memuat database...');
+        // Data Management (bisa dipanggil silent)
+        fetchMasterData: async (silent = false) => {
+            const res = await app.api({ action: 'getMasterData', idKorektor: state.user.kode }, 'Memuat database...', silent);
             if (res.status === 'success') {
                 state.dataSekolah = res.data;
             }
@@ -490,10 +491,16 @@
                 ui.showToast('success', 'Data berhasil tersimpan!');
                 app.updateCounter(res.totalSelesai);
                 
-                await app.fetchMasterData();
+                // --- PERBAIKAN: Optimistic Update (Hapus langsung dari memori) ---
+                state.dataSekolah = state.dataSekolah.filter(s => s.nama !== sekolah);
                 
+                // --- Re-render UI seketika ---
                 document.getElementById('select-kapanewon').value = lastKap;
                 app.handleKapanewon(); 
+                
+                // --- Background Fetch (Memperbarui data asli diam-diam tanpa loading layar) ---
+                app.fetchMasterData(true); 
+                
             } else {
                 ui.showToast('error', res.message || 'Gagal menyimpan data.');
             }
